@@ -1,38 +1,54 @@
 import tkinter as tk
 import subprocess
 import ast
+from tkinter import messagebox
+
 
 def generate_command():
     file_path = entry_path.get().replace("'", "").replace('"', "")
     one_file = get_checkbox_value()
+    console = get_checkbox_value2()
     hidden_import = entry_hidden.get()
 
-    command = "pyinstaller"
-    command += f" {file_path}"
-    if one_file:
-        command += f" {one_file}"
+    if len(file_path) < 3:
+        messagebox.showinfo(title="알림", message="py 파일을 찾을 수 없습니다. 경로를 확인해주십시오")
+        command = "py 파일을 찾을 수 없습니다. 경로를 확인해주십시오"
+        output_text.delete("1.0", tk.END)
+        output_text.insert(tk.END, command)
+    else:
+        command = "pyinstaller"
+        command += f" {file_path}"
+        if one_file:
+            command += f" {one_file}"
+        if console:
+            command += f" {console}"
 
-    if hidden_import:
-        hidden_import_list = hidden_import.split(",")
-        for imp in hidden_import_list:
-            command += f" --hidden-import {imp.strip()}"
+        if hidden_import:
+            hidden_import_list = hidden_import.split(",")
+            for imp in hidden_import_list:
+                command += f" --hidden-import {imp.strip()}"
 
-    output_text.delete("1.0", tk.END)
-    output_text.insert(tk.END, command)
+        output_text.delete("1.0", tk.END)
+        output_text.insert(tk.END, command)
 
 
 root = tk.Tk()
 
 # 파일 경로 입력
-label_path = tk.Label(root, text="파일 경로(file path):")
+label_path = tk.Label(root, text="py 파일 경로(py file path):")
 label_path.pack()
 entry_path = tk.Entry(root)
 entry_path.pack()
 
 # --onefile 체크박스
 checkbox_var = tk.IntVar()
-checkbox_onefile = tk.Checkbutton(root, text="한 파일로 병합(one file or not)", variable=checkbox_var)
+checkbox_onefile = tk.Checkbutton(root, text="한 파일로 병합(one file? )", variable=checkbox_var)
 checkbox_onefile.pack()
+
+# --noconsole 체크박스
+checkbox_var2 = tk.IntVar()
+checkbox_noconsole = tk.Checkbutton(root, text="콘솔 표시 안함(do not show console)", variable=checkbox_var2)
+checkbox_noconsole.pack()
 
 
 def get_checkbox_value():
@@ -41,6 +57,13 @@ def get_checkbox_value():
     else:
         checkbox_ornot = None
     return checkbox_ornot
+
+def get_checkbox_value2():
+    if checkbox_var2.get() == 1:
+        checkbox_ornot_console = "--nocosole"
+    else:
+        checkbox_ornot_console = None
+    return checkbox_ornot_console
 
 # --hidden-import 입력
 label_hidden = tk.Label(root, text="포함할 packages 입력(콤마로 구분합니다): ")
@@ -72,7 +95,10 @@ def check_imports():
         additional_output_text.insert(tk.END, f"- {package}\n")
 
 def on_check_button_click():
-    check_imports()
+    try:
+        check_imports()
+    except FileNotFoundError:
+        messagebox.showinfo(title="알림", message="py 파일을 찾을 수 없습니다. 경로를 확인해주십시오")
 
 check_button = tk.Button(root, text="Import 확인(check import)", command=on_check_button_click)
 check_button.pack()
