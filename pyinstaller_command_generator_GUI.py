@@ -1,8 +1,8 @@
+import os
 import tkinter as tk
-import subprocess
 import ast
 from tkinter import messagebox
-
+import subprocess
 
 def generate_command():
     file_path = entry_path.get().replace("'", "").replace('"', "")
@@ -32,6 +32,15 @@ def generate_command():
         output_text.insert(tk.END, command)
 
 
+def excute_shell():
+    output_value = output_text.get("1.0", tk.END)
+    #os.system(output_value)
+
+    # command를 실행하여 콘솔 출력 결과를 캡처합니다.
+    result = subprocess.run(output_value, capture_output=True, text=True, shell=True)
+    print(result.stdout.strip())
+    messagebox.showinfo(title="알림", message="입력한 py 파일이 존재하는 폴더의 dist 폴더에 exe 로 변환 작업 완료")
+
 root = tk.Tk()
 
 # 파일 경로 입력
@@ -58,12 +67,14 @@ def get_checkbox_value():
         checkbox_ornot = None
     return checkbox_ornot
 
+
 def get_checkbox_value2():
     if checkbox_var2.get() == 1:
-        checkbox_ornot_console = "--nocosole"
+        checkbox_ornot_console = "-nocosole"
     else:
         checkbox_ornot_console = None
     return checkbox_ornot_console
+
 
 # --hidden-import 입력
 label_hidden = tk.Label(root, text="포함할 packages 입력(콤마로 구분합니다): ")
@@ -72,8 +83,10 @@ entry_hidden = tk.Entry(root)
 entry_hidden.pack()
 
 # 명령어 출력
-button_generate = tk.Button(root, text="명령어 생성(generate)", command=generate_command)
+button_generate = tk.Button(root, text="명령어 생성(generate command)", command=generate_command)
 button_generate.pack()
+generate_exe = tk.Button(root, text="exe 생성(generate exe)", command=excute_shell)
+generate_exe.pack()
 
 output_text = tk.Text(root, height=10)
 output_text.pack()
@@ -85,6 +98,7 @@ def get_imported_packages(file_path):
         imports = [node.names[0].name.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
         return imports
 
+
 def check_imports():
     file_path = entry_path.get().replace("'", "").replace('"', "")
     imported_packages = get_imported_packages(file_path)
@@ -94,16 +108,18 @@ def check_imports():
     for package in imported_packages:
         additional_output_text.insert(tk.END, f"- {package}\n")
 
+
 def on_check_button_click():
     try:
         check_imports()
     except FileNotFoundError:
         messagebox.showinfo(title="알림", message="py 파일을 찾을 수 없습니다. 경로를 확인해주십시오")
 
+
 check_button = tk.Button(root, text="Import 확인(check import)", command=on_check_button_click)
 check_button.pack()
 
-#import 결과창
+# import 결과창
 additional_output_text = tk.Text(root, height=10)
 additional_output_text.pack()
 
