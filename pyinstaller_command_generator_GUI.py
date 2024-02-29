@@ -70,7 +70,7 @@ def get_checkbox_value():
 
 def get_checkbox_value2():
     if checkbox_var2.get() == 1:
-        checkbox_ornot_console = "-nocosole"
+        checkbox_ornot_console = "--nocosole"
     else:
         checkbox_ornot_console = None
     return checkbox_ornot_console
