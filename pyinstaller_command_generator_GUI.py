@@ -3,6 +3,7 @@ import tkinter as tk
 import ast
 from tkinter import messagebox
 import subprocess
+import threading
 
 def generate_command():
     file_path = entry_path.get().replace("'", "").replace('"', "")
@@ -33,13 +34,48 @@ def generate_command():
 
 
 def excute_shell():
-    output_value = output_text.get("1.0", tk.END)
-    #os.system(output_value)
-
     # command를 실행하여 콘솔 출력 결과를 캡처합니다.
-    result = subprocess.run(output_value, capture_output=True, text=True, shell=True)
-    print(result.stdout.strip())
-    messagebox.showinfo(title="알림", message="입력한 py 파일이 존재하는 폴더의 dist 폴더에 exe 로 변환 작업 완료")
+    output_value = output_text.get("1.0", tk.END).strip()
+    process = subprocess.Popen(output_value, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    stdout_output = []
+    stderr_output = []
+
+    def read_stdout(pipe, widget):
+        while True:
+            line = pipe.readline()
+            if line:
+                widget.insert(tk.END, line)
+                widget.see(tk.END)
+                stdout_output.append(line)
+            else:
+                break
+
+    def read_stderr(pipe, widget):
+        while True:
+            line = pipe.readline()
+            if line:
+                widget.insert(tk.END, line)
+                widget.see(tk.END)
+                stderr_output.append(line)
+            else:
+                break
+
+    stdout_thread = threading.Thread(target=read_stdout, args=(process.stdout, output_text))
+    stderr_thread = threading.Thread(target=read_stderr, args=(process.stderr, output_text))
+
+    stdout_thread.start()
+    stderr_thread.start()
+
+    def on_process_complete():
+        process.wait()
+        stdout_thread.join()
+        stderr_thread.join()
+        final_output = ''.join(stdout_output + stderr_output)
+        messagebox.showinfo(title="알림", message="입력한 명령어가 실행 완료되었습니다.")
+        print(final_output)  # 최종 출력 내용을 출력하거나 다른 용도로 사용할 수 있음
+
+    threading.Thread(target=on_process_complete).start()
 
 root = tk.Tk()
 
