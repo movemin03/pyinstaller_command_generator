@@ -127,23 +127,30 @@ generate_exe.pack()
 output_text = tk.Text(root, height=10)
 output_text.pack()
 
-
-def get_imported_packages(file_path):
-    with open(file_path, "r", encoding="utf-8") as file:
-        tree = ast.parse(file.read())
-        imports = [node.names[0].name.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
-        return imports
-
-
 def check_imports():
     file_path = entry_path.get().replace("'", "").replace('"', "")
-    imported_packages = get_imported_packages(file_path)
+
+    def extract_imports(file_path):
+        with open(file_path, 'r', encoding='utf-8') as file:
+            file_content = file.read()
+
+        tree = ast.parse(file_content)
+        imports = set()
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.add(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                imports.add(node.module)
+
+        return ','.join(imports)
+
+    imported_packages = extract_imports(file_path)
 
     additional_output_text.delete("1.0", tk.END)
     additional_output_text.insert(tk.END, "Imported Packages:\n")
-    for package in imported_packages:
-        additional_output_text.insert(tk.END, f"- {package}\n")
-
+    additional_output_text.insert(tk.END, imported_packages)
 
 def on_check_button_click():
     try:
