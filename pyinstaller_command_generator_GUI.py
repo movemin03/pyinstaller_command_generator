@@ -8,6 +8,7 @@ import json
 import ast
 import shutil
 from datetime import datetime
+import time
 
 
 class PyInstallerGUI:
@@ -438,6 +439,175 @@ class PyInstallerGUI:
         generate_version_btn = ttk.Button(version_info_frame, text="버전 파일 생성", command=self.generate_version_file)
         generate_version_btn.grid(row=2, column=0, columnspan=4, padx=5, pady=5)
 
+    def check_internet_connection(self):
+        """인터넷 연결 상태 확인"""
+        try:
+            # Google에 ping 보내기
+            process = subprocess.run(
+                ["ping", "-n", "1", "google.com"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5
+            )
+            return process.returncode == 0
+        except Exception:
+            return False
+
+    def create_virtual_env_and_install_packages(self, packages):
+        """가상환경 생성 및 패키지 설치"""
+        try:
+            # 임시 디렉토리 생성
+            temp_dir = os.path.join(os.path.dirname(self.script_path.get()), "temp_venv")
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+
+            # 가상환경 생성
+            self.log_text.insert(tk.END, f"가상환경 생성 중: {temp_dir}\n", "info")
+            self.log_text.see(tk.END)
+            self.root.update_idletasks()
+
+            process = subprocess.run(
+                [sys.executable, "-m", "venv", temp_dir],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            if process.returncode != 0:
+                self.log_text.insert(tk.END, f"가상환경 생성 실패: {process.stderr}\n", "error")
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+                return None, []
+
+            # 가상환경의 pip 경로
+            pip_path = os.path.join(temp_dir, "Scripts", "pip.exe") if os.name == "nt" else os.path.join(temp_dir,
+                                                                                                         "bin", "pip")
+            python_path = os.path.join(temp_dir, "Scripts", "python.exe") if os.name == "nt" else os.path.join(temp_dir,
+                                                                                                               "bin",
+                                                                                                               "python")
+
+            # 파이썬 기본 모듈 목록 (설치 시도에서 제외)
+            standard_libs = [
+                "os", "sys", "re", "json", "time", "datetime", "random", "math", "hashlib",
+                "subprocess", "shutil", "glob", "argparse", "collections", "copy", "csv",
+                "enum", "functools", "itertools", "io", "logging", "pickle", "platform",
+                "string", "tempfile", "threading", "traceback", "types", "typing", "uuid",
+                "warnings", "weakref", "zipfile"
+            ]
+
+            # pip 업그레이드 먼저 실행
+            self.log_text.insert(tk.END, "pip 업그레이드 중...\n", "info")
+            self.log_text.see(tk.END)
+            self.root.update_idletasks()
+
+            process = subprocess.run(
+                [python_path, "-m", "pip", "install", "--upgrade", "pip"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            if process.returncode == 0:
+                self.log_text.insert(tk.END, "pip 업그레이드 완료\n", "success")
+            else:
+                self.log_text.insert(tk.END, f"pip 업그레이드 실패: {process.stderr}\n", "warning")
+
+            self.log_text.see(tk.END)
+            self.root.update_idletasks()
+
+            # pyinstaller 먼저 설치
+            self.log_text.insert(tk.END, "PyInstaller 설치 중...\n", "info")
+            self.log_text.see(tk.END)
+            self.root.update_idletasks()
+
+            process = subprocess.run(
+                [pip_path, "install", "pyinstaller"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            if process.returncode == 0:
+                self.log_text.insert(tk.END, "PyInstaller 설치 완료\n", "success")
+            else:
+                self.log_text.insert(tk.END, f"PyInstaller 설치 실패: {process.stderr}\n", "error")
+
+            self.log_text.see(tk.END)
+            self.root.update_idletasks()
+
+            # tkinter는 tk로 설치
+            if "tkinter" in packages:
+                self.log_text.insert(tk.END, "tkinter(tk) 설치 중...\n", "info")
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+
+                process = subprocess.run(
+                    [pip_path, "install", "tk"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+
+                if process.returncode == 0:
+                    self.log_text.insert(tk.END, "tkinter(tk) 설치 완료\n", "success")
+                else:
+                    self.log_text.insert(tk.END, f"tkinter(tk) 설치 실패: {process.stderr}\n", "warning")
+
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+
+            # 나머지 패키지 설치 (기본 모듈 제외)
+            for package in packages:
+                # 기본 모듈이거나 이미 설치한 패키지는 건너뛰기
+                if package in standard_libs or package == "pyinstaller" or package == "tkinter":
+                    continue
+
+                self.log_text.insert(tk.END, f"패키지 설치 중: {package}\n", "info")
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+
+                process = subprocess.run(
+                    [pip_path, "install", package],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+
+                if process.returncode == 0:
+                    self.log_text.insert(tk.END, f"패키지 설치 완료: {package}\n", "success")
+                else:
+                    self.log_text.insert(tk.END, f"패키지 설치 실패: {package} - {process.stderr}\n", "warning")
+
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+
+            # 설치된 패키지 목록 가져오기
+            process = subprocess.run(
+                [pip_path, "freeze"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            if process.returncode == 0:
+                installed_packages = [line.split('==')[0] for line in process.stdout.splitlines() if line]
+                self.log_text.insert(tk.END, f"설치된 패키지: {', '.join(installed_packages)}\n", "info")
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+                return temp_dir, installed_packages
+            else:
+                self.log_text.insert(tk.END, f"패키지 목록 가져오기 실패: {process.stderr}\n", "error")
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+                return temp_dir, []
+
+        except Exception as e:
+            self.log_text.insert(tk.END, f"가상환경 생성 중 오류 발생: {str(e)}\n", "error")
+            self.log_text.see(tk.END)
+            self.root.update_idletasks()
+            return None, []
+
     def create_execution_tab(self):
         """실행 및 로그 탭 생성"""
         self.tab_execution = ttk.Frame(self.notebook)
@@ -462,6 +632,15 @@ class PyInstallerGUI:
 
         save_btn = ttk.Button(button_frame, text="설정 저장", command=self.save_project)
         save_btn.pack(side=tk.LEFT, padx=5, pady=5)
+
+        # 안전하게 모듈 추가하기 체크박스 추가
+        self.safe_module_var = tk.BooleanVar(value=True)  # 기본값 True로 설정
+        safe_module_check = ttk.Checkbutton(
+            button_frame,
+            text="안전하게 모듈 추가하기",
+            variable=self.safe_module_var
+        )
+        safe_module_check.pack(side=tk.LEFT, padx=5, pady=5)
 
         # 진행 상황 프레임
         progress_frame = ttk.LabelFrame(self.tab_execution, text="진행 상황")
@@ -898,6 +1077,49 @@ class PyInstallerGUI:
             messagebox.showwarning("경고", "Python 파일을 선택해주세요.")
             return
 
+        # 안전하게 모듈 추가하기 옵션이 켜져 있고 인터넷 연결이 되어 있는 경우
+        if self.safe_module_var.get() and self.check_internet_connection():
+            self.log_text.insert(tk.END, "인터넷 연결 확인됨. 안전 모드로 모듈 추가를 시작합니다.\n", "info")
+            self.log_text.see(tk.END)
+            self.root.update_idletasks()
+
+            # 파일 분석하여 필요한 패키지 목록 가져오기
+            with open(script_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            tree = ast.parse(content)
+            imports = set()
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for name in node.names:
+                        imports.add(name.name.split('.')[0])
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        imports.add(node.module.split('.')[0])
+
+            # 필요한 패키지 목록 생성 (pyinstaller는 자동으로 추가됨)
+            required_packages = list(imports)
+
+            # 가상환경 생성 및 패키지 설치
+            venv_dir, installed_packages = self.create_virtual_env_and_install_packages(required_packages)
+
+            if venv_dir and installed_packages:
+                self.log_text.insert(tk.END, "가상환경 생성 및 패키지 설치 완료. PyInstaller 명령어가 생성되었습니다. 실행버튼을 눌러주세요\n", "info")
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+
+                # 기존 숨겨진 임포트 목록 초기화 및 설치된 패키지로 업데이트
+                self.hidden_imports = installed_packages
+                self.hidden_listbox.delete(0, tk.END)
+                for package in installed_packages:
+                    self.hidden_listbox.insert(tk.END, package)
+        else:
+            if self.safe_module_var.get():
+                self.log_text.insert(tk.END, "인터넷 연결이 확인되지 않아 기존 방식으로 진행합니다.\n", "warning")
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+
         # 기본 명령어
         command = ["pyinstaller"]
 
@@ -963,18 +1185,8 @@ class PyInstallerGUI:
         for binary_file in self.binary_files:
             command.append(f"--add-binary=\"{binary_file}\"")
 
-        # 기본 숨겨진 임포트 추가 (자주 사용되는 패키지들)
-        default_hidden_imports = [
-            'subprocess', 'json', 'tkinter', 're', 'pandas', 'os', 'typing', 'configparser',
-            'pathlib', 'watchdog', 'hashlib', 'shutil', 'numpy', 'pandas._libs.window.aggregations',
-            'pandas._libs.lib', 'pandas._libs.hashtable'
-        ]
-
-        # 사용자가 추가한 숨겨진 임포트와 기본 임포트 합치기
-        all_hidden_imports = set(self.hidden_imports + default_hidden_imports)
-
-        # 숨겨진 임포트 추가
-        for hidden_import in all_hidden_imports:
+        # 숨겨진 임포트
+        for hidden_import in self.hidden_imports:
             command.append(f"--hidden-import={hidden_import}")
 
         # 제외 모듈
@@ -1004,9 +1216,10 @@ class PyInstallerGUI:
             command.append(f"--resource=\"{resource}\"")
 
         # 복잡한 패키지에 대한 collect-all 옵션 추가
-        collect_all_packages = ['pandas', 'numpy']
-        for package in collect_all_packages:
-            command.append(f"--collect-all={package}")
+        if "pandas" in self.hidden_imports:
+            command.append("--collect-all=pandas")
+        if "numpy" in self.hidden_imports:
+            command.append("--collect-all=numpy")
 
         # 스크립트 경로 추가
         command.append(f"\"{script_path}\"")
@@ -1121,13 +1334,20 @@ class PyInstallerGUI:
 
                         # GUI 업데이트는 메인 스레드에서 해야 함
                         if is_error and "ERROR" in line:
-                            self.root.after(0, lambda l=line, t=timestamp: self.log_text.insert(tk.END, f"[{t}] {l}",
-                                                                                                "error"))
+                            self.root.after(0, lambda l=line, t=timestamp: (
+                                self.log_text.insert(tk.END, f"[{t}] {l}", "error"),
+                                self.log_text.see(tk.END)
+                            ))
                         elif is_error and "WARNING" in line:
-                            self.root.after(0, lambda l=line, t=timestamp: self.log_text.insert(tk.END, f"[{t}] {l}",
-                                                                                                "warning"))
+                            self.root.after(0, lambda l=line, t=timestamp: (
+                                self.log_text.insert(tk.END, f"[{t}] {l}", "warning"),
+                                self.log_text.see(tk.END)
+                            ))
                         else:
-                            self.root.after(0, lambda l=line, t=timestamp: self.log_text.insert(tk.END, f"[{t}] {l}"))
+                            self.root.after(0, lambda l=line, t=timestamp: (
+                                self.log_text.insert(tk.END, f"[{t}] {l}"),
+                                self.log_text.see(tk.END)
+                            ))
 
                         # 진행 상태 업데이트
                         for keyword, progress in progress_keywords.items():
@@ -1136,8 +1356,8 @@ class PyInstallerGUI:
                                 self.root.after(0, lambda l=line: self.progress_label.config(text=l.strip()))
                                 break
 
-                        # 스크롤 자동 이동
-                        self.root.after(0, lambda: self.log_text.see(tk.END))
+                        # 실시간 업데이트를 위해 잠시 대기
+                        time.sleep(0.01)
 
                 # 출력 및 에러 스트림을 별도 스레드에서 읽기
                 stdout_thread = threading.Thread(target=read_output, args=(process.stdout, False))
