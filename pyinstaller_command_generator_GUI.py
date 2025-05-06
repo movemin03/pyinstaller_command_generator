@@ -493,8 +493,24 @@ class PyInstallerGUI:
                 "subprocess", "shutil", "glob", "argparse", "collections", "copy", "csv",
                 "enum", "functools", "itertools", "io", "logging", "pickle", "platform",
                 "string", "tempfile", "threading", "traceback", "types", "typing", "uuid",
-                "warnings", "weakref", "zipfile"
+                "warnings", "weakref", "zipfile", "pathlib"  # pathlib 추가
             ]
+
+            # 패키지명과 모듈명 매핑 (pip 설치명 -> 실제 임포트명)
+            package_to_module = {
+                "python-dateutil": "dateutil",
+                "tk": "tkinter",
+                "pywin32-ctypes": "win32ctypes",
+                "pyinstaller-hooks-contrib": "_pyinstaller_hooks_contrib"
+            }
+
+            # 모듈명과 패키지명 매핑 (실제 임포트명 -> pip 설치명)
+            module_to_package = {
+                "tkinter": "tk",
+                "dateutil": "python-dateutil",
+                "win32ctypes": "pywin32-ctypes",
+                "_pyinstaller_hooks_contrib": "pyinstaller-hooks-contrib"
+            }
 
             # pip 업그레이드 먼저 실행
             self.log_text.insert(tk.END, "pip 업그레이드 중...\n", "info")
@@ -536,7 +552,7 @@ class PyInstallerGUI:
             self.log_text.see(tk.END)
             self.root.update_idletasks()
 
-            # tkinter는 tk로 설치
+            # tkinter가 필요하면 tk 패키지 설치
             if "tkinter" in packages:
                 self.log_text.insert(tk.END, "tkinter(tk) 설치 중...\n", "info")
                 self.log_text.see(tk.END)
@@ -557,27 +573,52 @@ class PyInstallerGUI:
                 self.log_text.see(tk.END)
                 self.root.update_idletasks()
 
-            # 나머지 패키지 설치 (기본 모듈 제외)
-            for package in packages:
-                # 기본 모듈이거나 이미 설치한 패키지는 건너뛰기
-                if package in standard_libs or package == "pyinstaller" or package == "tkinter":
-                    continue
-
-                self.log_text.insert(tk.END, f"패키지 설치 중: {package}\n", "info")
+            # Visual C++ 런타임 관련 패키지 설치 (pandas 종속성 문제 해결)
+            if "pandas" in packages:
+                self.log_text.insert(tk.END, "pandas 종속성 패키지 설치 중...\n", "info")
                 self.log_text.see(tk.END)
                 self.root.update_idletasks()
 
+                # numpy 먼저 설치 (pandas 종속성)
                 process = subprocess.run(
-                    [pip_path, "install", package],
+                    [pip_path, "install", "numpy"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True
                 )
 
                 if process.returncode == 0:
-                    self.log_text.insert(tk.END, f"패키지 설치 완료: {package}\n", "success")
+                    self.log_text.insert(tk.END, "numpy 설치 완료\n", "success")
                 else:
-                    self.log_text.insert(tk.END, f"패키지 설치 실패: {package} - {process.stderr}\n", "warning")
+                    self.log_text.insert(tk.END, f"numpy 설치 실패: {process.stderr}\n", "warning")
+
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+
+            # 나머지 패키지 설치 (기본 모듈 제외)
+            for package in packages:
+                # 기본 모듈이거나 이미 설치한 패키지는 건너뛰기
+                if package in standard_libs or package == "pyinstaller" or package == "tkinter":
+                    continue
+
+                # 모듈명을 패키지명으로 변환 (필요한 경우)
+                install_package = module_to_package.get(package, package)
+
+                self.log_text.insert(tk.END, f"패키지 설치 중: {install_package}\n", "info")
+                self.log_text.see(tk.END)
+                self.root.update_idletasks()
+
+                process = subprocess.run(
+                    [pip_path, "install", install_package],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+
+                if process.returncode == 0:
+                    self.log_text.insert(tk.END, f"패키지 설치 완료: {install_package}\n", "success")
+                else:
+                    self.log_text.insert(tk.END, f"패키지 설치 실패: {install_package} - {process.stderr}\n", "warning")
 
                 self.log_text.see(tk.END)
                 self.root.update_idletasks()
@@ -591,11 +632,26 @@ class PyInstallerGUI:
             )
 
             if process.returncode == 0:
-                installed_packages = [line.split('==')[0] for line in process.stdout.splitlines() if line]
-                self.log_text.insert(tk.END, f"설치된 패키지: {', '.join(installed_packages)}\n", "info")
+                # pip freeze 결과에서 패키지 이름만 추출
+                installed_packages_raw = [line.split('==')[0] for line in process.stdout.splitlines() if line]
+
+                # 실제 모듈 이름으로 변환 (패키지명 -> 모듈명)
+                installed_modules = []
+                for pkg in installed_packages_raw:
+                    if pkg in package_to_module:
+                        installed_modules.append(package_to_module[pkg])
+                    else:
+                        installed_modules.append(pkg)
+
+                # 기본 모듈 추가
+                for pkg in packages:
+                    if pkg in standard_libs and pkg not in installed_modules:
+                        installed_modules.append(pkg)
+
+                self.log_text.insert(tk.END, f"설치된 패키지: {', '.join(installed_modules)}\n", "info")
                 self.log_text.see(tk.END)
                 self.root.update_idletasks()
-                return temp_dir, installed_packages
+                return temp_dir, installed_modules
             else:
                 self.log_text.insert(tk.END, f"패키지 목록 가져오기 실패: {process.stderr}\n", "error")
                 self.log_text.see(tk.END)
@@ -1284,9 +1340,6 @@ class PyInstallerGUI:
         # 로그 초기화
         self.clear_log()
 
-        # 로그 초기화
-        self.clear_log()
-
         # 진행 상황 초기화
         self.progress_var.set(0)
         self.progress_label.config(text="빌드 시작...")
@@ -1299,21 +1352,62 @@ class PyInstallerGUI:
         self.log_text.insert(tk.END, f"[{start_time.strftime('%H:%M:%S')}] 빌드 시작...\n", "info")
         self.log_text.see(tk.END)
 
+        # 안전 모드가 켜져 있고 가상환경이 생성되어 있는지 확인
+        use_venv = False
+        venv_dir = None
+
+        if self.safe_module_var.get():
+            # 스크립트 경로에서 디렉토리 추출
+            script_dir = os.path.dirname(self.script_path.get())
+            venv_dir = os.path.join(script_dir, "temp_venv")
+
+            if os.path.exists(venv_dir) and os.path.isdir(venv_dir):
+                use_venv = True
+                self.log_text.insert(tk.END, f"가상환경을 사용하여 빌드합니다: {venv_dir}\n", "info")
+                self.log_text.see(tk.END)
+
         # 명령어 실행 스레드
         def run_command():
             try:
-                # 프로세스 실행 - 버퍼링 없이 실시간 출력을 위한 설정
-                process = subprocess.Popen(
-                    command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    encoding='CP949',  # 명시적으로 UTF-8 인코딩 지정
-                    errors='replace',  # 디코딩할 수 없는 바이트는 대체 문자로 대체
-                    text=True,
-                    bufsize=1,  # 라인 버퍼링
-                    universal_newlines=True
-                )
+                # 가상환경에서 실행할지 결정
+                if use_venv:
+                    # 가상환경의 PyInstaller 경로
+                    pyinstaller_path = os.path.join(venv_dir, "Scripts",
+                                                    "pyinstaller.exe") if os.name == "nt" else os.path.join(venv_dir,
+                                                                                                            "bin",
+                                                                                                            "pyinstaller")
+
+                    # 명령어에서 'pyinstaller' 부분을 가상환경의 pyinstaller 경로로 대체
+                    venv_command = command.replace("pyinstaller", f'"{pyinstaller_path}"', 1)
+
+                    self.log_text.insert(tk.END, f"가상환경에서 실행하는 명령어: {venv_command}\n", "info")
+                    self.log_text.see(tk.END)
+
+                    # 가상환경에서 명령 실행
+                    process = subprocess.Popen(
+                        venv_command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        encoding='cp949',  # Windows 한국어 환경에 맞는 인코딩
+                        errors='replace',  # 디코딩할 수 없는 바이트는 대체 문자로 대체
+                        text=True,
+                        bufsize=1,
+                        universal_newlines=True
+                    )
+                else:
+                    # 일반 환경에서 명령 실행
+                    process = subprocess.Popen(
+                        command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        encoding='cp949',  # Windows 한국어 환경에 맞는 인코딩
+                        errors='replace',  # 디코딩할 수 없는 바이트는 대체 문자로 대체
+                        text=True,
+                        bufsize=1,
+                        universal_newlines=True
+                    )
 
                 # 진행 상태 추적을 위한 키워드
                 progress_keywords = {
