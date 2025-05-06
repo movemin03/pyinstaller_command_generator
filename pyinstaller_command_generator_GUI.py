@@ -940,21 +940,22 @@ class PyInstallerGUI:
         self.progress_var.set(0)
         self.progress_label.config(text="빌드 시작...")
 
+        # 시작 시간 기록 및 로그에 표시
+        start_time = datetime.now()
+        self.log_text.insert(tk.END, f"[{start_time.strftime('%H:%M:%S')}] 빌드 시작...\n", "info")
+        self.log_text.see(tk.END)
+
         # 명령어 실행 스레드
         def run_command():
             try:
-                # 시작 시간 기록
-                start_time = datetime.now()
-                self.log_text.insert(tk.END, f"[{start_time.strftime('%H:%M:%S')}] 빌드 시작...\n", "info")
-
-                # 프로세스 실행
+                # 프로세스 실행 - 버퍼링 없이 실시간 출력을 위한 설정
                 process = subprocess.Popen(
                     command,
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    bufsize=1,
+                    bufsize=1,  # 라인 버퍼링
                     universal_newlines=True
                 )
 
@@ -970,108 +971,75 @@ class PyInstallerGUI:
                     "Completed": 100
                 }
 
-                # 표준 출력 처리
-                for line in iter(process.stdout.readline, ''):
-                    # 로그에 추가
-                    timestamp = datetime.now().strftime('%H:%M:%S')
-                    self.log_text.insert(tk.END, f"[{timestamp}] {line}")
+                # 표준 출력 처리 함수
+                def read_output(pipe, is_error=False):
+                    for line in iter(pipe.readline, ''):
+                        timestamp = datetime.now().strftime('%H:%M:%S')
 
-                    # 진행 상태 업데이트
-                    for keyword, progress in progress_keywords.items():
-                        if keyword in line:
-                            self.progress_var.set(progress)
-                            self.progress_label.config(text=line.strip())
-                            break
+                        # GUI 업데이트는 메인 스레드에서 해야 함
+                        if is_error and "ERROR" in line:
+                            self.root.after(0, lambda: self.log_text.insert(tk.END, f"[{timestamp}] {line}", "error"))
+                        elif is_error and "WARNING" in line:
+                            self.root.after(0, lambda: self.log_text.insert(tk.END, f"[{timestamp}] {line}", "warning"))
+                        else:
+                            self.root.after(0, lambda: self.log_text.insert(tk.END, f"[{timestamp}] {line}"))
 
-                    # 스크롤 자동 이동
-                    self.log_text.see(tk.END)
-                    self.root.update_idletasks()
+                        # 진행 상태 업데이트
+                        for keyword, progress in progress_keywords.items():
+                            if keyword in line:
+                                self.root.after(0, lambda p=progress: self.progress_var.set(p))
+                                self.root.after(0, lambda l=line: self.progress_label.config(text=l.strip()))
+                                break
 
-                # 표준 에러 처리
-                for line in iter(process.stderr.readline, ''):
-                    timestamp = datetime.now().strftime('%H:%M:%S')
-                    if "ERROR" in line:
-                        self.log_text.insert(tk.END, f"[{timestamp}] {line}", "error")
-                    elif "WARNING" in line:
-                        self.log_text.insert(tk.END, f"[{timestamp}] {line}", "warning")
-                    else:
-                        self.log_text.insert(tk.END, f"[{timestamp}] {line}")
+                        # 스크롤 자동 이동
+                        self.root.after(0, lambda: self.log_text.see(tk.END))
 
-                    self.log_text.see(tk.END)
-                    self.root.update_idletasks()
+                # 출력 및 에러 스트림을 별도 스레드에서 읽기
+                stdout_thread = threading.Thread(target=read_output, args=(process.stdout, False))
+                stderr_thread = threading.Thread(target=read_output, args=(process.stderr, True))
+
+                stdout_thread.daemon = True
+                stderr_thread.daemon = True
+
+                stdout_thread.start()
+                stderr_thread.start()
 
                 # 프로세스 완료 대기
                 process.wait()
+
+                # 스레드 완료 대기
+                stdout_thread.join()
+                stderr_thread.join()
 
                 # 종료 시간 기록
                 end_time = datetime.now()
                 duration = end_time - start_time
 
                 if process.returncode == 0:
-                    self.progress_var.set(100)
-                    self.progress_label.config(text="빌드 완료!")
-                    self.log_text.insert(tk.END,
-                                         f"[{end_time.strftime('%H:%M:%S')}] 빌드 완료! (소요 시간: {duration.seconds}초)\n",
-                                         "success")
+                    self.root.after(0, lambda: self.progress_var.set(100))
+                    self.root.after(0, lambda: self.progress_label.config(text="빌드 완료!"))
+                    self.root.after(0, lambda: self.log_text.insert(tk.END,
+                                                                    f"[{end_time.strftime('%H:%M:%S')}] 빌드 완료! (소요 시간: {duration.seconds}초)\n",
+                                                                    "success"))
 
-                    # 빌드 결과 정보 표시
-                    try:
-                        output_path = self.output_dir.get() if self.output_dir.get() else "./dist"
-                        app_name = self.app_name.get() if self.app_name.get() else \
-                        os.path.splitext(os.path.basename(self.script_path.get()))[0]
-
-                        if self.build_type.get() == "--onefile":
-                            exe_path = os.path.join(output_path, f"{app_name}.exe")
-                            if os.path.exists(exe_path):
-                                size_mb = os.path.getsize(exe_path) / (1024 * 1024)
-                                self.log_text.insert(tk.END, f"\n빌드 결과:\n", "info")
-                                self.log_text.insert(tk.END, f"- 실행 파일: {exe_path}\n")
-                                self.log_text.insert(tk.END, f"- 파일 크기: {size_mb:.2f} MB\n")
-                                self.log_text.insert(tk.END,
-                                                     f"- 생성 시간: {datetime.fromtimestamp(os.path.getctime(exe_path)).strftime('%Y-%m-%d %H:%M:%S')}\n")
-                        else:
-                            dir_path = os.path.join(output_path, app_name)
-                            if os.path.exists(dir_path):
-                                exe_path = os.path.join(dir_path, f"{app_name}.exe")
-                                if os.path.exists(exe_path):
-                                    size_mb = os.path.getsize(exe_path) / (1024 * 1024)
-                                    total_size = 0
-                                    file_count = 0
-
-                                    for root, dirs, files in os.walk(dir_path):
-                                        for file in files:
-                                            file_path = os.path.join(root, file)
-                                            total_size += os.path.getsize(file_path)
-                                            file_count += 1
-
-                                    total_size_mb = total_size / (1024 * 1024)
-
-                                    self.log_text.insert(tk.END, f"\n빌드 결과:\n", "info")
-                                    self.log_text.insert(tk.END, f"- 출력 디렉토리: {dir_path}\n")
-                                    self.log_text.insert(tk.END, f"- 실행 파일: {exe_path}\n")
-                                    self.log_text.insert(tk.END, f"- 실행 파일 크기: {size_mb:.2f} MB\n")
-                                    self.log_text.insert(tk.END, f"- 총 파일 수: {file_count}개\n")
-                                    self.log_text.insert(tk.END, f"- 총 크기: {total_size_mb:.2f} MB\n")
-
-                        # 완료 메시지 표시
-                        messagebox.showinfo("빌드 완료", "PyInstaller 빌드가 성공적으로 완료되었습니다.")
-                    except Exception as e:
-                        self.log_text.insert(tk.END, f"빌드 정보 수집 중 오류 발생: {str(e)}\n", "error")
+                    # 빌드 결과 정보 표시 및 완료 메시지
+                    self.root.after(0, lambda: self.show_build_results())
                 else:
-                    self.progress_label.config(text="빌드 실패!")
-                    self.log_text.insert(tk.END,
-                                         f"[{end_time.strftime('%H:%M:%S')}] 빌드 실패! (소요 시간: {duration.seconds}초)\n",
-                                         "error")
-                    messagebox.showerror("빌드 실패", "PyInstaller 빌드 중 오류가 발생했습니다. 로그를 확인해주세요.")
+                    self.root.after(0, lambda: self.progress_label.config(text="빌드 실패!"))
+                    self.root.after(0, lambda: self.log_text.insert(tk.END,
+                                                                    f"[{end_time.strftime('%H:%M:%S')}] 빌드 실패! (소요 시간: {duration.seconds}초)\n",
+                                                                    "error"))
+                    self.root.after(0,
+                                    lambda: messagebox.showerror("빌드 실패", "PyInstaller 빌드 중 오류가 발생했습니다. 로그를 확인해주세요."))
 
             except Exception as e:
-                self.log_text.insert(tk.END, f"명령어 실행 중 오류 발생: {str(e)}\n", "error")
-                self.progress_label.config(text="오류 발생!")
-                messagebox.showerror("오류", f"명령어 실행 중 오류가 발생했습니다: {str(e)}")
+                self.root.after(0, lambda: self.log_text.insert(tk.END, f"명령어 실행 중 오류 발생: {str(e)}\n", "error"))
+                self.root.after(0, lambda: self.progress_label.config(text="오류 발생!"))
+                self.root.after(0, lambda: messagebox.showerror("오류", f"명령어 실행 중 오류가 발생했습니다: {str(e)}"))
 
             finally:
                 # 상태 업데이트
-                self.status_bar.config(text="명령어 실행 완료")
+                self.root.after(0, lambda: self.status_bar.config(text="명령어 실행 완료"))
 
         # 스레드 시작
         threading.Thread(target=run_command, daemon=True).start()
