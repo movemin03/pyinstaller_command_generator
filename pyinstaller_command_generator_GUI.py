@@ -1095,6 +1095,8 @@ class PyInstallerGUI:
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    encoding='utf-8',  # 명시적으로 UTF-8 인코딩 지정
+                    errors='replace',  # 디코딩할 수 없는 바이트는 대체 문자로 대체
                     text=True,
                     bufsize=1,  # 라인 버퍼링
                     universal_newlines=True
