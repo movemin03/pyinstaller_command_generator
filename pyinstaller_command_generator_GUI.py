@@ -78,6 +78,7 @@ class PyInstallerGUI:
 
         ttk.Label(file_frame, text="Python 파일 경로:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.script_path = tk.StringVar()
+        self.script_path.trace_add("write", self.on_script_path_change)
         script_entry = ttk.Entry(file_frame, textvariable=self.script_path, width=50)
         script_entry.grid(row=0, column=1, padx=5, pady=5)
 
@@ -150,6 +151,13 @@ class PyInstallerGUI:
         ttk.Label(log_frame, text="로그 레벨:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         log_combo = ttk.Combobox(log_frame, textvariable=self.log_level, values=log_levels, state="readonly")
         log_combo.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+
+    def on_script_path_change(self, *args):
+        """파일 경로가 변경될 때 호출되는 콜백"""
+        file_path = self.script_path.get()
+        if file_path and os.path.isfile(file_path) and file_path.endswith('.py'):
+            # 경로가 유효한 Python 파일인 경우에만 분석 실행
+            self.analyze_and_add_imports(file_path)
 
     def create_advanced_tab(self):
         """고급 설정 탭 생성"""
@@ -489,6 +497,73 @@ class PyInstallerGUI:
         save_log_btn = ttk.Button(log_button_frame, text="로그 저장", command=self.save_log)
         save_log_btn.pack(side=tk.LEFT, padx=5)
 
+        # 생성된 파일 확인하기 버튼 추가
+        self.open_output_btn = ttk.Button(log_button_frame, text="생성된 파일 확인하기",
+                                          command=self.open_output_folder, state="disabled")
+        self.open_output_btn.pack(side=tk.LEFT, padx=5)
+
+    def open_output_folder(self):
+        """생성된 출력 폴더 열기"""
+        try:
+            output_path = self.output_dir.get() if self.output_dir.get() else "./dist"
+            app_name = self.app_name.get() if self.app_name.get() else \
+            os.path.splitext(os.path.basename(self.script_path.get()))[0]
+
+            # 빌드 타입에 따라 경로 결정
+            if self.build_type.get() == "--onefile":
+                folder_path = output_path
+            else:
+                folder_path = os.path.join(output_path, app_name)
+
+            # 폴더가 존재하는지 확인
+            if os.path.exists(folder_path):
+                # Windows에서 폴더 열기
+                os.startfile(folder_path)
+            else:
+                messagebox.showwarning("경고", "출력 폴더를 찾을 수 없습니다.")
+        except Exception as e:
+            messagebox.showerror("오류", f"폴더를 열 수 없습니다: {str(e)}")
+
+    def analyze_and_add_imports(self, file_path):
+        """파일을 분석하고 숨겨진 임포트를 자동으로 추가"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            tree = ast.parse(content)
+            imports = set()
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for name in node.names:
+                        imports.add(name.name.split('.')[0])
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        imports.add(node.module.split('.')[0])
+
+            # 기존 숨겨진 임포트 목록 초기화
+            self.hidden_imports = []
+            self.hidden_listbox.delete(0, tk.END)
+
+            # 분석된 임포트 추가
+            for imp in sorted(imports):
+                self.hidden_imports.append(imp)
+                self.hidden_listbox.insert(tk.END, imp)
+
+            # 로그에 분석 결과 표시
+            self.log_text.delete("1.0", tk.END)
+            self.log_text.insert(tk.END, "=== 임포트 분석 결과 ===\n", "info")
+            for imp in sorted(imports):
+                self.log_text.insert(tk.END, f"- {imp}\n")
+            self.log_text.insert(tk.END, "=======================\n", "info")
+            self.log_text.see(tk.END)
+
+            # 상태 업데이트
+            self.status_bar.config(text=f"파일 분석 완료: {len(imports)}개의 임포트를 찾았습니다.")
+
+        except Exception as e:
+            messagebox.showerror("오류", f"파일 분석 중 오류 발생: {str(e)}")
+
     # 유틸리티 메서드
     def browse_script(self):
         """Python 스크립트 파일 선택"""
@@ -501,6 +576,9 @@ class PyInstallerGUI:
             # 파일 이름을 기반으로 앱 이름 설정
             base_name = os.path.splitext(os.path.basename(file_path))[0]
             self.app_name.set(base_name)
+
+            # 파일 분석 및 임포트 추가
+            self.analyze_and_add_imports(file_path)
 
     def browse_output_dir(self):
         """출력 디렉토리 선택"""
@@ -885,8 +963,18 @@ class PyInstallerGUI:
         for binary_file in self.binary_files:
             command.append(f"--add-binary=\"{binary_file}\"")
 
-        # 숨겨진 임포트
-        for hidden_import in self.hidden_imports:
+        # 기본 숨겨진 임포트 추가 (자주 사용되는 패키지들)
+        default_hidden_imports = [
+            'subprocess', 'json', 'tkinter', 're', 'pandas', 'os', 'typing', 'configparser',
+            'pathlib', 'watchdog', 'hashlib', 'shutil', 'numpy', 'pandas._libs.window.aggregations',
+            'pandas._libs.lib', 'pandas._libs.hashtable'
+        ]
+
+        # 사용자가 추가한 숨겨진 임포트와 기본 임포트 합치기
+        all_hidden_imports = set(self.hidden_imports + default_hidden_imports)
+
+        # 숨겨진 임포트 추가
+        for hidden_import in all_hidden_imports:
             command.append(f"--hidden-import={hidden_import}")
 
         # 제외 모듈
@@ -915,6 +1003,11 @@ class PyInstallerGUI:
         for resource in self.resources:
             command.append(f"--resource=\"{resource}\"")
 
+        # 복잡한 패키지에 대한 collect-all 옵션 추가
+        collect_all_packages = ['pandas', 'numpy']
+        for package in collect_all_packages:
+            command.append(f"--collect-all={package}")
+
         # 스크립트 경로 추가
         command.append(f"\"{script_path}\"")
 
@@ -926,6 +1019,48 @@ class PyInstallerGUI:
         # 상태 업데이트
         self.status_bar.config(text="명령어가 생성되었습니다.")
 
+    def show_build_results(self):
+        """빌드 결과 정보 표시"""
+        try:
+            output_path = self.output_dir.get() if self.output_dir.get() else "./dist"
+            app_name = self.app_name.get() if self.app_name.get() else \
+            os.path.splitext(os.path.basename(self.script_path.get()))[0]
+
+            if self.build_type.get() == "--onefile":
+                exe_path = os.path.join(output_path, f"{app_name}.exe")
+                if os.path.exists(exe_path):
+                    size_mb = os.path.getsize(exe_path) / (1024 * 1024)
+                    self.log_text.insert(tk.END, f"\n빌드 결과:\n", "info")
+                    self.log_text.insert(tk.END, f"- 실행 파일: {exe_path}\n")
+                    self.log_text.insert(tk.END, f"- 파일 크기: {size_mb:.2f} MB\n")
+                    self.log_text.insert(tk.END,
+                                         f"- 생성 시간: {datetime.fromtimestamp(os.path.getctime(exe_path)).strftime('%Y-%m-%d %H:%M:%S')}\n")
+            else:
+                dir_path = os.path.join(output_path, app_name)
+                if os.path.exists(dir_path):
+                    exe_path = os.path.join(dir_path, f"{app_name}.exe")
+                    if os.path.exists(exe_path):
+                        size_mb = os.path.getsize(exe_path) / (1024 * 1024)
+                        total_size = 0
+                        file_count = 0
+
+                        for root, dirs, files in os.walk(dir_path):
+                            for file in files:
+                                file_path = os.path.join(root, file)
+                                total_size += os.path.getsize(file_path)
+                                file_count += 1
+
+                        total_size_mb = total_size / (1024 * 1024)
+
+                        self.log_text.insert(tk.END, f"\n빌드 결과:\n", "info")
+                        self.log_text.insert(tk.END, f"- 출력 디렉토리: {dir_path}\n")
+                        self.log_text.insert(tk.END, f"- 실행 파일: {exe_path}\n")
+                        self.log_text.insert(tk.END, f"- 실행 파일 크기: {size_mb:.2f} MB\n")
+                        self.log_text.insert(tk.END, f"- 총 파일 수: {file_count}개\n")
+                        self.log_text.insert(tk.END, f"- 총 크기: {total_size_mb:.2f} MB\n")
+        except Exception as e:
+            self.log_text.insert(tk.END, f"빌드 정보 수집 중 오류 발생: {str(e)}\n", "error")
+
     def execute_command(self):
         """PyInstaller 명령어 실행"""
         command = self.command_text.get("1.0", tk.END).strip()
@@ -936,9 +1071,15 @@ class PyInstallerGUI:
         # 로그 초기화
         self.clear_log()
 
+        # 로그 초기화
+        self.clear_log()
+
         # 진행 상황 초기화
         self.progress_var.set(0)
         self.progress_label.config(text="빌드 시작...")
+
+        # 파일 확인 버튼 비활성화
+        self.open_output_btn.config(state="disabled")
 
         # 시작 시간 기록 및 로그에 표시
         start_time = datetime.now()
@@ -978,11 +1119,13 @@ class PyInstallerGUI:
 
                         # GUI 업데이트는 메인 스레드에서 해야 함
                         if is_error and "ERROR" in line:
-                            self.root.after(0, lambda: self.log_text.insert(tk.END, f"[{timestamp}] {line}", "error"))
+                            self.root.after(0, lambda l=line, t=timestamp: self.log_text.insert(tk.END, f"[{t}] {l}",
+                                                                                                "error"))
                         elif is_error and "WARNING" in line:
-                            self.root.after(0, lambda: self.log_text.insert(tk.END, f"[{timestamp}] {line}", "warning"))
+                            self.root.after(0, lambda l=line, t=timestamp: self.log_text.insert(tk.END, f"[{t}] {l}",
+                                                                                                "warning"))
                         else:
-                            self.root.after(0, lambda: self.log_text.insert(tk.END, f"[{timestamp}] {line}"))
+                            self.root.after(0, lambda l=line, t=timestamp: self.log_text.insert(tk.END, f"[{t}] {l}"))
 
                         # 진행 상태 업데이트
                         for keyword, progress in progress_keywords.items():
@@ -1022,8 +1165,14 @@ class PyInstallerGUI:
                                                                     f"[{end_time.strftime('%H:%M:%S')}] 빌드 완료! (소요 시간: {duration.seconds}초)\n",
                                                                     "success"))
 
-                    # 빌드 결과 정보 표시 및 완료 메시지
+                    # 빌드 결과 정보 표시
                     self.root.after(0, lambda: self.show_build_results())
+
+                    # 파일 확인 버튼 활성화
+                    self.root.after(0, lambda: self.open_output_btn.config(state="normal"))
+
+                    # 완료 메시지 표시
+                    self.root.after(0, lambda: messagebox.showinfo("빌드 완료", "PyInstaller 빌드가 성공적으로 완료되었습니다."))
                 else:
                     self.root.after(0, lambda: self.progress_label.config(text="빌드 실패!"))
                     self.root.after(0, lambda: self.log_text.insert(tk.END,
